@@ -1,0 +1,215 @@
+/**
+*
+*@file      
+*
+*@brief    Automatic Infrared Tracking Car \n
+*
+*@author   <邝晨阳>
+*
+*@date     <2018/11/9>
+*
+*@version  1.0
+*
+*@end
+*/
+
+#include "reg52.h"
+#include "math.h"
+
+typedef unsigned char u8;
+typedef unsigned int u32;
+
+u8 count = 0;
+u8 channel, pct;
+u8 time;
+
+/**
+*  Motor drive IO port and ENA, ENB enable terminal definition; 
+*  IN1&IN2 control left motor; IN3&IN4 control right motor; 
+*/ 
+sbit IN1 = P2^3;
+sbit IN2 = P2^4;
+sbit ENB = P2^5;
+sbit IN3 = P2^1;
+sbit IN4 = P2^2;
+sbit ENA = P2^0;
+
+/**
+*  Infrared tracking module definition 
+*/
+sbit left   = P3^1;
+sbit middle = P3^2;  //externel interruption reserved
+sbit right  = P3^3;
+
+
+/**
+*@brief Delay func. definition
+*/
+void delay_us(u8 a) //Millisecond
+{
+	while (a--);
+}
+void delay(u8 z)    //Microseconds
+{
+	u8 x, y;
+	for (x = z; x > 0; x--)
+	   for (y = 110; y > 0; y--);
+}
+
+
+void init()
+{
+	TMOD = 0x01;      //Timer 0 working mode 1
+	 TH0 = 0xff;      //(65536-10)/256;          //Initial value timing
+	 TL0 = 0xf7;      //(65536-10)%256;          //0.01ms
+	 EA  = 1;         //Open total interruption
+	 ET0 = 1;         //Open timer 0 interrupt
+	 TR0 = 1;         //Start timer 0
+}
+
+
+/**
+*@defgroup
+*
+*@brief Speed control using Timer0;
+*@{
+*   Value:    -255  ~  255
+*    Mode: backward ~ forward
+*@}
+*@end
+*/
+void spdctrl(char ch, int spdvalue)
+{
+	if (spdvalue == 0)
+	{
+			ENA = 0;
+			ENB = 0;
+	}
+	
+	else if (ch == "ENA")
+	{
+			if (spdvalue > 0)
+			{
+					IN1 = 1;
+					IN2 = 0;
+			}
+			else
+			{
+					IN1 = 0;
+					IN2 = 1;
+			}
+	}
+	
+	else if (ch == "ENB")
+	{
+			if (spdvalue > 0)
+			{
+					IN3 = 1;
+					IN4 = 0;
+			}
+			else
+			{
+					IN3 = 0;
+					IN4 = 1;
+			}
+	}
+}
+
+/** 
+*
+*@brief Mode definition, associated with function 'spdctrl()';
+*
+*@end
+*/
+void workMode(int value_A, int value_B)
+{
+	init();
+	spdctrl("ENA", value_A);
+	spdctrl("ENB", value_B);
+}
+
+
+
+
+void track()
+{
+	if (left == 0)          //Returns 0 while checking out black lines 
+		workMode(80, 20);
+	if (right == 0)
+		workMode(20, 80);
+}
+
+
+
+void main()
+{
+	int i;
+	
+	EA = 1;      //Total interruption opened 
+	EX1 = 1;     //Open INT1
+	
+	while (count <= 18)
+	{
+		track();
+		
+		if (middle == 0)
+			IT1 = 1;     //Set the falling edge trigger
+		
+		
+		switch (count)
+		{			
+			case 1: 	workMode(80, 20); 
+								break;
+		
+			case 2:		
+				
+			case 5:		
+				
+			case 8: 	workMode(80, 80); 
+								break;
+		
+			case 3: 	workMode(80, 80); 
+								workMode(100, -80);
+								break; 
+		
+			case 4: 	workMode(20, 80);
+								break; 
+		
+			case 7: 	workMode(80, 20);
+								break; 
+		
+			case 12:	workMode(80, 80); 
+								workMode(-80, 100);
+								break; 
+		
+			case 13: 	workMode(20, 80);
+								break; 
+		
+			case 14:	workMode(0, 0);
+								break;
+		}
+	}
+}
+
+void Timer0() interrupt 1  //Timer 0 interrupt routine   //12MHz
+{
+	TR0 = 0;       //赋初值时，关闭定时器
+	TH0 = 0xff;    //(65536-10)/256;         //赋初值定时
+	TL0 = 0xf7;    //(65536-10)%256;         //0.01ms
+	TR0 = 1;       //打开定时器
+ 
+	time++;
+	if (time >= 100)  //Guaranteed frequency is 1kHZ    //freq = 1s/(0.01ms * 100)
+	  time = 0; 
+	
+	if (time <= pct)   //Duty cycle at pct% and can be changed
+	  channel = 1;  
+	else channel = 0;
+}
+
+void lineCounter() interrupt 2  //External interrupt for counting 
+{
+	while (!middle)
+		tracking();
+	count++;
+}
